@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>随音 MusicXML 解析测试</title><style>body{font:15px system-ui;padding:30px;background:#f6f5f1;color:#345038}li{padding:6px}.fail{color:#b33}a{color:#b96e41}</style><h1>MusicXML 浏览器测试</h1><p id="summary">运行中…</p><ol id="results"></ol><a href="/">返回练习室</a><script type="module">
+import {parseMusicXML} from '../src/music.mjs';
+const wrap=body=>`<score-partwise><work><work-title>解析测试</work-title></work><part id="P1"><measure number="1"><attributes><divisions>2</divisions><time><beats>4</beats><beat-type>4</beat-type></time></attributes>${body}</measure></part></score-partwise>`;
+const note=(step='C',extra='',duration=2)=>`<note>${extra}<pitch><step>${step}</step><octave>4</octave></pitch><duration>${duration}</duration></note>`;
+let passed=0,failed=0;
+function test(name,fn){const li=document.createElement('li');try{fn();passed++;li.textContent='通过 · '+name;}catch(e){failed++;li.textContent='失败 · '+name+'：'+e.message;li.className='fail';}document.getElementById('results').append(li);}
+const assert=(value)=>{if(!value)throw new Error('断言不成立');};
+const rejects=(xml)=>{let thrown=false;try{parseMusicXML(xml);}catch{thrown=true;}assert(thrown);};
+test('读取标题、拍号及 MIDI 音高',()=>{const s=parseMusicXML(wrap(note()));assert(s.title==='解析测试'&&s.beats===4&&s.events[0].pitches[0]===60);});
+test('divisions 转换为四分音符拍数',()=>assert(parseMusicXML(wrap(note('D','',4))).events[0].duration===2));
+test('将同起点和弦聚合为单一目标',()=>{const s=parseMusicXML(wrap(note()+note('E','<chord/>')+note('G','<chord/>')));assert(s.events[0].pitches.join(',')==='60,64,67');});
+test('休止符保留时值',()=>{const s=parseMusicXML(wrap('<note><rest/><duration>2</duration></note>'+note()));assert(s.events[0].pitches.length===0&&s.events[1].beat===1);});
+test('升号转换到实际音高',()=>{const s=parseMusicXML(wrap(note().replace('<octave>','<alter>1</alter><octave>')));assert(s.events[0].pitches[0]===61);});
+test('跨小节延音线合并，不重复计目标音',()=>{const xml='<score-partwise><part><measure number="1" implicit="yes"><attributes><divisions>2</divisions></attributes>'+note('C','<tie type="start"/>')+'</measure><measure number="2" implicit="yes">'+note('C','<tie type="stop"/>')+'</measure></part></score-partwise>';const s=parseMusicXML(xml);assert(s.events.filter(e=>e.pitches.length).length===1&&s.events[0].duration===2);});
+test('拒绝损坏 XML',()=>rejects('<score-partwise><part>'));
+test('拒绝没有声部的文件',()=>rejects('<score-partwise/>'));
+test('拒绝复杂多声部，不静默丢失音符',()=>rejects(wrap(note()+'<backup><duration>2</duration></backup>'+note('D'))));
+test('拒绝未展开反复记号',()=>rejects(wrap(note()+'<barline><repeat direction="backward"/></barline>')));
+test('拒绝移调谱，防止提示错误实音',()=>rejects(wrap('<attributes><transpose><chromatic>2</chromatic></transpose></attributes>'+note())));
+test('拒绝无可奏音的文件',()=>rejects(wrap('<note><rest/><duration>8</duration></note>')));
+test('拒绝 score-timewise 根节点',()=>rejects('<score-timewise/>'));
+test('拒绝同组不同时值和弦',()=>rejects(wrap(note()+note('E','<chord/>',4))));
+test('跨小节和弦延音保持同起点',()=>{const group=type=>note('C',`<tie type="${type}"/>`)+note('E',`<chord/><tie type="${type}"/>`);const xml='<score-partwise><part><measure implicit="yes"><attributes><divisions>2</divisions></attributes>'+group('start')+'</measure><measure implicit="yes">'+group('stop')+'</measure></part></score-partwise>';const s=parseMusicXML(xml);assert(s.events.length===1&&s.events[0].duration===2&&s.events[0].pitches.join(',')==='60,64');});
+document.getElementById('summary').textContent=`${passed} 项通过，${failed} 项失败`;
+</script></html>
