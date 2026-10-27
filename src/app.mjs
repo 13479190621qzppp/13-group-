@@ -1,5 +1,6 @@
 import { PracticeEngine } from './engine.mjs';
 import { AudioEngine } from './audio.mjs';
+import { BackendMirror } from './backend-client.mjs';
 import { INSTRUMENTS, SCORES, KEY_CODES, keyLabel, noteName, targetsFor, parseMusicXML } from './music.mjs';
 
 const $ = id => document.getElementById(id);
@@ -27,6 +28,7 @@ function icon(name) { return `<svg class="icon" viewBox="0 0 24 24" aria-hidden=
 function decorate(root=document) { root.querySelectorAll('[data-icon]').forEach(el=>el.innerHTML=icon(el.dataset.icon)); }
 decorate();
 const audio = new AudioEngine();
+const backend = new BackendMirror(status => { const el=$('backend-status'); if(el) el.textContent=status; });
 const modeNames = {wait:'等待模式',follow:'跟弹模式',demo:'示范模式'};
 const errorNames = {wrong:'错音',missed:'漏音',extra:'多音',early:'抢拍',late:'拖拍'};
 const state = {
@@ -94,7 +96,7 @@ function validateSettings() {
 }
 function reset({save=true}={}) {
   if(save) { if(state.status==='running') { state.elapsed=currentTime(); state.status='paused'; } saveReport(); }
-  cancelCountdown(); allNotesOff(); clearDemo();
+  cancelCountdown(); allNotesOff(); clearDemo(); backend.reset();
   state.engine=null; state.status='idle'; state.elapsed=0; state.sessionSaved=false; state.demoIndex=0; state.lastBeat=-1;
   state.errors.clear(); state.flashes.clear(); $('position-label').textContent='准备就绪'; render();
 }
@@ -112,6 +114,7 @@ async function begin() {
     state.engine=new PracticeEngine(state.score,{mode:state.mode,bpm:Number($('tempo').value),tolerance:Number($('tolerance').value),chordWindow:Number($('chord-window').value),loop:getLoop()});
     state.sessionId=`practice-${Date.now()}`;
     state.sessionLoop=getLoop();
+    if(state.mode!=='demo') backend.start(state.score, {mode:state.mode,bpm:Number($('tempo').value),tolerance:Number($('tolerance').value),chordWindow:Number($('chord-window').value),loop:getLoop()});
   }
   if(state.mode==='demo' || state.mode==='follow') {
     state.status='countdown'; renderTransport(); let count=3;
@@ -136,14 +139,14 @@ function finish(show=true) {
   if(state.status==='running') {state.elapsed=currentTime();state.status='paused';}
   cancelCountdown(); allNotesOff(); clearDemo();
   if(state.mode==='demo') {state.status='done';render();toast('示范结束，切换等待或跟弹模式试一试。');return;}
-  saveReport(); state.status='done'; render();
+  saveReport(); backend.finish(currentTime()); state.status='done'; render();
   if(show) setPage('reports');
 }
 function complete() {
   if(state.status!=='running') return;
   const loop=getLoop();
   if(loop) {
-    state.elapsed=currentTime(); state.status='paused'; saveReport();
+    state.elapsed=currentTime(); state.status='paused'; saveReport(); backend.finish(state.elapsed);
     toast(`第 ${loop[0]}–${loop[1]} 小节练习完成，开始下一轮。`);
     reset({save:false}); begin();
   } else { finish(false); toast('练习完成！本次报告已生成。'); }
@@ -168,6 +171,7 @@ async function noteOn(id, pitch, velocity=.8) {
   audio.on(id,pitch,state.instrument,velocity);
   const now=performance.now();
   if(state.status==='running'&&state.mode!=='demo') {
+    backend.event('note_on',pitch,currentTime(),velocity,id.split('-')[0]);
     const result=state.engine.noteOn(pitch,currentTime());
     if(result.type==='correct') {state.flashes.set(pitch,now+220); if(result.complete) $('position-label').textContent='很好，继续保持';}
     else if(result.type!=='idle') {state.errors.set(pitch,now+650);$('position-label').textContent=`${errorNames[result.type]} · 试试 ${state.engine.current?.pitches.map(noteName).join(' + ')||''}`;}
@@ -179,7 +183,10 @@ async function noteOn(id, pitch, velocity=.8) {
 function noteOff(id) {
   const pitch=state.active.get(id);
   state.active.delete(id); audio.off(id);
-  if(pitch!==undefined) window.dispatchEvent(new CustomEvent('suiyin:note',{detail:{id,type:'note_off',pitch,velocity:0,timestamp:Math.round(currentTime()),source:id.split('-')[0]}}));
+  if(pitch!==undefined) {
+    if(state.engine && state.mode!=='demo') backend.event('note_off',pitch,currentTime(),0,id.split('-')[0]);
+    window.dispatchEvent(new CustomEvent('suiyin:note',{detail:{id,type:'note_off',pitch,velocity:0,timestamp:Math.round(currentTime()),source:id.split('-')[0]}}));
+  }
   paintInstrument();
 }
 function allNotesOff() { for(const id of [...state.active.keys()]) noteOff(id); audio.stop(); pointers.clear(); }
@@ -448,11 +455,30 @@ $('speed-reset').onclick=()=>{$('tempo').value=state.score.bpm;toast('已恢复�
 $('connect-midi').onclick=connectMIDI;
 $('session-report').onclick=()=>{if(state.status==='running'||state.status==='countdown')pause();state.selectedReport=0;setPage('reports');};
 $('export-report').onclick=exportReport;
+$('model-file').onchange=() => { $('model-output').textContent=$('model-file').files[0]?.name || '尚未选择音频'; };
+$('model-transcribe').onclick=async () => {
+  const file=$('model-file').files[0];
+  if(!file) { toast('请先选择 WAV 音频文件。'); return; }
+  if(file.size>5*1024*1024) { toast('WAV 文件不得超过 5 MiB。'); return; }
+  const button=$('model-transcribe'), output=$('model-output');
+  button.disabled=true; output.textContent='正在调用 Basic Pitch 音频转录服务…';
+  try {
+    const response=await fetch('/api/transcriptions',{method:'POST',headers:{'Content-Type':'audio/wav'},body:file,signal:AbortSignal.timeout(90000)});
+    const data=await response.json();
+    if(!response.ok) throw new Error(data.message || '模型服务暂不可用');
+    const excerpt=data.notes.slice(0,24).map(n=>`${(n.startMs/1000).toFixed(2)}s · ${noteName(n.pitch)}`).join('、');
+    output.textContent=`模型：${data.model}\n识别音符 ${data.noteCount} 个 · 推理 ${data.inferenceMs} ms · 完整 HTTP 往返 ${data.roundTripMs} ms\n${excerpt}${data.noteCount>24?' …':''}`;
+    // 同一份规范化曲谱可直接用于批量匹配；识别结果不回写原练习报告。
+    const match=await fetch('/api/match',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({score:state.score,options:{mode:'follow',bpm:Number($('tempo').value)},notes:data.notes.map(n=>({pitch:n.pitch,startMs:n.startMs})),endMs:Math.max(0,...data.notes.map(n=>n.endMs))})});
+    if(match.ok){const compared=await match.json();output.textContent+=`\n当前曲谱对齐：${compared.report.correct}/${compared.report.total} 个目标音正确，${compared.report.errors.length} 条错误（离线粗对齐）`;} 
+  }catch(error){output.textContent=`模型不可用：${error.message}\n按键练习无需启动音频模型，仍能正常使用。`;}finally{button.disabled=false;}
+};
 new ResizeObserver(()=>renderScore()).observe($('score-stage'));
 function frame(now) {
   if(state.status==='running') {
     const time=currentTime();
     if(state.mode!=='demo'){
+      backend.tick(time);
       const oldIndex=state.engine.index,oldErrors=state.engine.errors.length;state.engine.tick(time);
       if(state.engine.done)complete();
       else if(oldIndex!==state.engine.index||oldErrors!==state.engine.errors.length){$('position-label').textContent='漏音已记录，跟上下一音';render();}

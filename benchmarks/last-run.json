@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-10-22T13:16:27.513Z",
+  "node": "v22.16.0",
+  "platform": "linux",
+  "architecture": "x64",
+  "remark": "测试对象是回环 HTTP 单次请求；包括服务器 JSON 序列化和网络栈，但不代表实际键盘/声卡/麦克风端到端延迟。前 10 次不计入统计。",
+  "api": {
+    "requestRoundTrip": {
+      "count": 100,
+      "avgMs": 1.945,
+      "p50Ms": 1.641,
+      "p95Ms": 3.031,
+      "p99Ms": 5.634,
+      "maxMs": 10.545
+    },
+    "serverProcessing": {
+      "count": 100,
+      "avgMs": 0.273,
+      "p50Ms": 0.194,
+      "p95Ms": 0.664,
+      "p99Ms": 0.918,
+      "maxMs": 2.16
+    }
+  },
+  "model": {
+    "status": "not_tested",
+    "reason": "模型未安装或未启动"
+  }
+}

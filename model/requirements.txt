@@ -1,0 +1,4 @@
+# Windows Python 3.10 x64 推荐；需联网安装依赖和模型权重
+basic-pitch==0.4.0
+onnxruntime>=1.17,<2
+numpy>=1.23,<2

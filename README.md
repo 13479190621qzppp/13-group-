@@ -1,34 +1,20 @@
+> **课程后端交付**：请打开 `课程交付-部署与模型调用.md`、`API接口文档.md` 和 `课程汇报-后端技术与答辩稿.md`；已新增 JSON 数据持久化、异步音频任务队列和对应自动化测试。
+
 # 随音 · 乐器练习室
 
-面向“乐器跟弹与键位提示”的课程设计前端工程。界面、采样和核心规则均在浏览器本地运行；无需登录、数据库或 npm 依赖安装。
+面向“乐器跟弹与键位提示”的课程设计工程：原有前端完整保留，新增 **Node.js 规范化曲谱 API、按键会话判定、离线音符匹配**，并提供可选的 **Python Spotify Basic Pitch 音频转录服务**。浏览器依然即时发声和判定；按键事件旁路同步至后端进行同规则服务端对照。无需登录、数据库或 npm 依赖安装。
+
+**新功能的 Windows 一步步安装、接口格式及延迟测试，请优先阅读 [`README-后端模型.md`](README-后端模型.md)。**
 
 ## 启动
 
-需要 Node.js 18 或更新版本，建议从 https://nodejs.org 安装当前 LTS 版本。无需运行 `npm install`。
+电脑已安装 Node.js 18 或更新版本时，双击 `启动随音.bat`，保持终端开启，在 Chrome / Edge 打开 http://localhost:5173 。也可在本目录运行：
 
-### macOS
-
-双击本目录的 `启动随音.command`，启动成功后会自动打开默认浏览器。使用期间保持终端窗口开启，按 `Control+C` 停止服务。
-
-如果双击提示没有执行权限，在终端输入 `chmod +x `（末尾保留空格），把 `启动随音.command` 拖入终端后按回车，再双击运行。
-
-也可以打开“终端”，输入 `cd `（末尾保留空格），把 `项目工程` 文件夹拖入终端后按回车，再运行：
-
-```sh
-npm start
+```powershell
+node server.cjs
 ```
 
-随后访问 http://localhost:5173 。普通练习可使用现代 Safari；连接外接 MIDI 设备建议使用 Chrome / Edge，并允许 MIDI 访问。首次点击琴键或开始练习后才会开启声音；电脑键盘弹奏建议切换到英文输入法。
-
-### Windows
-
-双击 `启动随音.bat`，保持终端开启，在浏览器打开 http://localhost:5173 。也可在本目录运行 `npm start`。
-
-### 常见问题
-
-不要直接双击 `index.html` 通过 `file://` 打开，浏览器模块和采样需要 HTTP 服务。项目使用相对路径，包含中文或空格的目录名无需修改。
-
-端口被占用时，先查看是否已有本项目服务；如需另开端口，macOS 在项目目录执行 `PORT=5174 npm start`，Windows 在 PowerShell 中执行 `$env:PORT=5174` 后 `npm start`，然后访问 http://localhost:5174 。
+不要用 `file://` 直接打开 index.html，浏览器模块和采样需要 HTTP 服务。端口被占用时，先查看是否已有本项目服务；或在 PowerShell 中执行 `$env:PORT=5174` 后 `node server.cjs`。
 
 ## 已实现
 
@@ -56,12 +42,15 @@ npm start
 ```text
 index.html                 页面结构
 styles.css                 响应式样式
-启动随音.command            macOS 双击启动（自动打开浏览器）
-启动随音.bat                Windows 双击启动
 src/app.mjs                页面状态、输入统一、视图与报告
 src/engine.mjs             不依赖 DOM 的跟随与判定内核
 src/music.mjs              曲谱、乐器适配与 MusicXML 解析
 src/audio.mjs              Web Audio 多音采样器及节拍器
+src/backend-client.mjs      浏览器无阻塞后端旁路同步
+backend/api.mjs             乐谱库、会话、演奏事件、批量对齐与模型代理 API
+model/model_server.py       可选 Spotify Basic Pitch 模型推理服务
+scripts/benchmark.mjs       规则匹配 HTTP 延迟与可选模型推理测试
+README-后端模型.md           Windows 启动步骤、API 文档及性能指标
 samples/                   本地 MP3 与原始授权
 tests/engine.test.mjs       Node 自动化测试
 tests/parser.html          浏览器 MusicXML 测试
@@ -72,7 +61,7 @@ tests/parser.html          浏览器 MusicXML 测试
 
 ## 测试
 
-```sh
+```powershell
 npm test
 ```
 
@@ -80,7 +69,7 @@ npm test
 
 ## 本版边界
 
-这是完整可运行的前端原型。跟随采用本地音符与时间窗口规则，不具备 Matchmaker 的复杂跳奏、自由速度估计或失步重定位；尚未接后端 API、账户服务或音频转录模型。老师要求的“模型部署实践”需要后端成员补齐，不能用本地规则判定代替。
+当前版本已经提供 Node.js 后端 API 与可选 Python Basic Pitch 模型服务部署代码，但浏览器练习仍由本地内核即时驱动，后端是旁路验证。离线 WAV 转录模型与 HTTP 接口的代码已完成，目标设备仍须安装 Python 依赖并实际验证，不能当作已经完成 Windows 模型性能验证。跟随采用规则时间窗口，不具备 Matchmaker 的复杂跳奏、自由速度估计或失步重定位。
 
 MusicXML 导入支持第一乐器、单声部、同起点等时值和弦、基础升降号和延音线；复杂多声部、移调乐器、反复展开、中途变拍号、压缩 MXL 和 Guitar Pro 不支持。谱面采用简化高音谱表，按实音显示临时升号，不完整还原原文件排版、连梁、连音线或指法标记。超过当前乐器可见音域的曲谱可查看，但练习开始时会提示更换曲谱或乐器。两份适配描述以键盘与弦品映射为示例，新增完全不同的乐器外观仍需对应渲染器。
 
